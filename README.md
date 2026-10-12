@@ -1,4 +1,4 @@
-# L1-Tap（连点器）
+# L1-Tap — Android 连点器/自动点击器（免 Root · 无障碍手势 · 悬浮窗）
 
 Android 悬浮窗连点器工具。两个悬浮钮（⚙ 设置/停止钮 48dp + ◎ 靶标 24dp），把靶标拖到目标位置，设置参数后自动连点。
 
@@ -42,7 +42,7 @@ Android 悬浮窗连点器工具。两个悬浮钮（⚙ 设置/停止钮 48dp +
 ## 构建指南
 
 ```bash
-bash build.sh   # 产物 out/AutoClicker-v1.4.apk
+bash build.sh   # 产物 out/AutoClicker-v1.0.0.apk
 ```
 
 环境依赖：JDK 11+、Android SDK build-tools 33+（脚本内 `BT`/`JB` 变量指向本机路径，克隆后按需修改）。
@@ -65,8 +65,18 @@ bash build.sh   # 产物 out/AutoClicker-v1.4.apk
 
 | 版本 | versionCode | 要点 |
 |---|---|---|
-| 1.3 | 4 | 初版骨架：双悬浮窗 + 无障碍手势连点 |
-| 1.4 | 5 | 参数模型重做（次数+秒）、安全体系重构（触摸即停/靶标变化即停/防锁屏/通知栏停止）、修复 5 轮真机 bug（见 `docs/开发笔记-经验与踩坑.md`） |
+| 1.0.0 | 5 | 首个公开发布版。参数模型（次数+秒）、安全体系（触摸即停/靶标变化即停/防锁屏/通知栏停止）、修复 5 轮真机 bug（见 `docs/开发笔记-经验与踩坑.md`） |
+| 1.3（内部） | 4 | 初版骨架：双悬浮窗 + 无障碍手势连点 |
+
+## 下载
+
+- 最新版：[Releases · v1.0.0](https://github.com/gooooddayy/L1-Tap/releases/latest) 下载 `AutoClicker-v1.0.0.apk`
+- 安装：下载后直接安装；首次打开按引导授予悬浮窗 + 无障碍权限（各一次）
+- 系统要求：Android 7.0 及以上；免 Root
+
+## 关键词
+
+Android 连点器 / 自动点击器 / auto clicker / 免 Root / 无障碍 / 悬浮窗 / 悬浮球 / 手机自动连点 / 屏幕自动点击 / 国产 ROM 适配
 
 ## 开发排错
 

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>L1-Tap 连点器 - Android 自动点击器（免 Root / 无障碍 / 悬浮窗）</title>
+<meta name="description" content="L1-Tap 是一款免费开源的 Android 连点器（自动点击器），免 Root、基于无障碍手势实现，悬浮窗操作，支持自定义连点时间、频次与循环轮次。多重防误触与随时停止机制，适配 Android 7.0+ 与主流国产 ROM。">
+<meta name="keywords" content="连点器,自动点击器,Android连点器,免Root连点,悬浮窗,无障碍,自动连点,手机连点器,屏幕自动点击,auto clicker,L1-Tap">
+<meta name="robots" content="index,follow">
+<meta property="og:title" content="L1-Tap — Android 连点器（免 Root / 开源免费）">
+<meta property="og:description" content="免 Root 的 Android 自动点击器：悬浮窗设置参数（连点时间/频次/循环轮次），多重安全停止机制，适配 Android 7.0+。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://gooooddayy.github.io/L1-Tap/">
+<style>
+  body{font-family:"Microsoft YaHei",system-ui,sans-serif;margin:0;background:#f6faf6;color:#1a2b1e;line-height:1.7}
+  .wrap{max-width:760px;margin:0 auto;padding:32px 20px}
+  h1{font-size:1.7em} .badge{display:inline-block;background:#35C75A;color:#fff;border-radius:99px;padding:2px 12px;font-size:.85em;margin-right:6px}
+  .dl{display:inline-block;background:#35C75A;color:#fff!important;text-decoration:none;padding:12px 28px;border-radius:99px;font-weight:bold;margin:10px 0}
+  .gh{display:inline-block;color:#1F7A33!important;font-weight:bold;margin-left:14px}
+  code{background:#eaf3ea;padding:1px 6px;border-radius:4px}
+  table{border-collapse:collapse;width:100%} td,th{border:1px solid #cfe0cf;padding:6px 10px;font-size:.95em}
+  footer{margin-top:40px;color:#7a8a7c;font-size:.85em;border-top:1px solid #dfe9df;padding-top:16px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>L1-Tap 连点器</h1>
+  <p>
+    <span class="badge">免 Root</span><span class="badge">开源免费</span><span class="badge">仅 42KB</span><span class="badge">Android 7.0+</span>
+  </p>
+  <p><strong>L1-Tap</strong> 是一款免费开源的 Android <strong>连点器（自动点击器）</strong>。无需 Root，通过系统无障碍手势实现真实点击：把悬浮靶标拖到屏幕任意位置，设置参数后自动连点，多重机制保证随时可停、绝不失控。</p>
+
+  <p>
+    <a class="dl" href="https://github.com/gooooddayy/L1-Tap/releases/latest">⬇ 下载最新版 APK</a>
+    <a class="gh" href="https://github.com/gooooddayy/L1-Tap">GitHub 源码 →</a>
+  </p>
+
+  <h2>功能特点</h2>
+  <ul>
+    <li><strong>直观操作</strong>：两个悬浮钮 —— 设置钮（48dp）与靶标（24dp），拖到哪点到哪，点哪儿就是哪儿</li>
+    <li><strong>因果参数模型</strong>：连点时间（秒）× 连点频次（次数）× 循环轮次，实时换算点击间隔，不用心算</li>
+    <li><strong>安全第一</strong>：触摸屏幕任意位置立即停止、停止钮一碰即停、通知栏停止、靶标位置变化自动停止、息屏自动停止、异常自动熔断 —— 任何一条通道都独立可用</li>
+    <li><strong>零依赖</strong>：仅 42KB、无广告、不联网、不收集任何数据</li>
+  </ul>
+
+  <h2>参数说明</h2>
+  <table>
+    <tr><th>参数</th><th>含义</th><th>默认</th></tr>
+    <tr><td>连点时间</td><td>点击持续的时长（秒）</td><td>30 秒</td></tr>
+    <tr><td>连点频次</td><td>持续时间内的点击总次数</td><td>10 次</td></tr>
+    <tr><td>循环轮次</td><td>循环的轮数（0 = 只跑一轮）</td><td>0</td></tr>
+  </table>
+  <p>换算规则：<code>点击间隔 = 连点时间 ÷ 连点频次</code>，例如 30 秒 / 10 次 = 每 3 秒点 1 次。</p>
+
+  <h2>常见问题</h2>
+  <ul>
+    <li><strong>需要 Root 吗？</strong> 不需要，基于系统无障碍服务的手势派发能力。</li>
+    <li><strong>支持哪些系统？</strong> Android 7.0 及以上；在 ColorOS 等国产 ROM 上经过多轮真机调优。</li>
+    <li><strong>会误触或停不下来吗？</strong> 七条独立停止通道（详见 GitHub README），安全优先设计。</li>
+  </ul>
+
+  <footer>
+    L1-Tap · 开源项目（GPL 友好使用，保留署名）·
+    <a href="https://github.com/gooooddayy/L1-Tap">GitHub 仓库</a> ·
+    <a href="sitemap.xml">网站地图</a>
+  </footer>
+</div>
+</body>
+</html>

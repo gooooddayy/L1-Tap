@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://gooooddayy.github.io/L1-Tap/sitemap.xml

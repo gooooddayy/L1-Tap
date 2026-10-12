@@ -9,7 +9,7 @@ replay_pid*.log
 *.idsig
 
 # 签名密钥：不入公开仓库，单独存于私有仓库 gooooddayy/L1-Tap-sign
-keystore/app.jks
+keystore/
 keystore/*.local
 
 # 系统杂物
