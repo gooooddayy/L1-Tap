@@ -1,0 +1,23 @@
+android {
+    namespace 'com.l1.autoclicker'
+    compileSdk 37
+
+    defaultConfig {
+        applicationId 'com.l1.autoclicker'
+        minSdk 24
+        targetSdk 33
+        versionCode 5
+        versionName '1.4'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
