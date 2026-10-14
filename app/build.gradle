@@ -6,8 +6,8 @@ android {
         applicationId 'com.l1.autoclicker'
         minSdk 24
         targetSdk 33
-        versionCode 5
-        versionName '1.0.0'
+        versionCode 21
+        versionName '1.0.0ap'
     }
 
     buildTypes {

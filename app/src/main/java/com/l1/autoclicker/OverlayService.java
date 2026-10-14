@@ -20,7 +20,6 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
-import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.InputType;
@@ -50,10 +49,13 @@ import android.animation.ValueAnimator;
  * B. 执行中两个悬浮窗的触摸策略：
  *    - 靶标整体 FLAG_NOT_TOUCHABLE：只显示不拦截，触摸穿透到下面的应用；
  *    - 红色停止钮一碰即停（ACTION_DOWN 立即停）。
- * C. 用户一有操作就停：引擎侧监听真实触屏事件（TapService），任意触摸立即停。
- * D. 靶标变化即停：引擎侧每 500ms 比对落点特征/前台应用/屏幕方向。
+ * C. 用户一有操作就停：执行期挂「海绵监听层」（4 块矩形铺满全屏，仅锁点 ±2dp 小孔）。
+ *    自动点击只能从孔里穿过 → 摸到海绵 = 100% 用户触摸，摸到即停，无需任何真手/注入判别。
+ *    （v1.0.0ai 架构定案：ColorOS 的触摸副本坐标/旗标/工具类型全部不可复原，
+ *    「旁听副本 + 判别真手」整条路线作废——aa~ah 五轮均折在此。）
+ * D. 靶标变化即停：引擎侧每 250ms 比对落点特征/前台应用/屏幕方向。
  * E. 防锁屏：执行中悬浮窗带 FLAG_KEEP_SCREEN_ON（屏幕常亮）；息屏广播立即停。
- * F. 停止通道：红钮 / 触摸屏幕 / 通知栏「停止」/ 息屏 / 切走页面 / 服务被杀。
+ * F. 停止通道：海绵层触摸 / 红钮 / 注入手势被取消（侧滑抢占）/ 通知栏 / 息屏 / 切走页面 / 服务被杀。
  */
 public class OverlayService extends Service {
 
@@ -67,6 +69,11 @@ public class OverlayService extends Service {
     private static final String K_SX = "sx", K_SY = "sy", K_TX = "tx", K_TY = "ty";
     private static final String K_DUR = "dur", K_CNT = "cnt", K_ROUNDS = "rounds";
     private static final int NOTIF_ID = 1;
+
+    // 海绵监听层（执行期铺满全屏）：仅锁点周围留 ±2dp 小孔，孔外任意一点触摸 = 用户。
+    // DOWN 落在锁点 80dp 内 → 拖动模式（超 slop 即停+换位；轻点即停）；其余位置 DOWN 即停。
+    private static final int SPONGE_DRAG_DP = 80;
+    private static final int SPONGE_HOLE_DP = 2;
 
     /** 供 MainActivity 在 onPause 时请求停止连点（服务未必存在，须判空）。 */
     public static volatile OverlayService instance;
@@ -88,6 +95,13 @@ public class OverlayService extends Service {
 
     private View mPanelRoot;
     private ObjectAnimator mBlink;
+
+    // 海绵监听层：4 块矩形窗铺满全屏（仅锁点 ±2dp 小孔），只在执行期存在
+    private final View[] mSpongeViews = new View[4];
+    private boolean mSpongeAdded;
+    private Runnable mSpongePending;   // 延迟挂海绵的任务（startClicking 错开首击用）
+    private Runnable mSpongeRemovePending;   // 停止后延迟拆海绵的任务（an：防自动停后触摸直达应用误点）
+    private boolean mSpongeTouching;   // 海绵上有手指在屏：停止时延迟拆除，拖动不被打断
 
     /** 息屏即停（UI 侧；引擎侧 TapService 另有接收器双保险）。 */
     private final BroadcastReceiver mScreenReceiver = new BroadcastReceiver() {
@@ -114,6 +128,10 @@ public class OverlayService extends Service {
 
     @Override public void onDestroy() {
         stopClicking();
+        mSpongeTouching = false;   // 服务销毁：强制拆海绵
+        if (mSpongePending != null) mMain.removeCallbacks(mSpongePending);
+        if (mSpongeRemovePending != null) mMain.removeCallbacks(mSpongeRemovePending);
+        removeSponge();
         try { unregisterReceiver(mScreenReceiver); } catch (Exception ig) {}
         removeOverlays();
         dismissSettingsPanel();
@@ -138,20 +156,17 @@ public class OverlayService extends Service {
         mTarget = new TargetControl(this);
         int sb = mBtnSize, tb = mTgtSize;
 
-        mSettingsLp = new WindowManager.LayoutParams(sb, sb,
+        mSettingsLp = noFit(new WindowManager.LayoutParams(sb, sb,
                 Build.VERSION.SDK_INT >= 26 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                         : WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                         // 关键：以整屏(含状态栏)为坐标系，与手势派发的绝对坐标一致，否则锁点整体偏移
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                        // ColorOS 不投递触摸类无障碍事件，「用户一有操作就停」改由本窗口旁听：
-                        // 屏幕任意位置的触摸按下都会送来一个 ACTION_OUTSIDE（不拦截、不影响正常操作）
-                        | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-                PixelFormat.TRANSLUCENT);
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT));
         mSettingsLp.gravity = Gravity.TOP | Gravity.START;
-        mTargetLp = new WindowManager.LayoutParams(tb, tb, mSettingsLp.type,
-                mSettingsLp.flags, PixelFormat.TRANSLUCENT);
+        mTargetLp = noFit(new WindowManager.LayoutParams(tb, tb, mSettingsLp.type,
+                mSettingsLp.flags, PixelFormat.TRANSLUCENT));
         mTargetLp.gravity = Gravity.TOP | Gravity.START;
 
         // 初始位置：默认设置钮在右上角、靶标在内容区中央
@@ -206,20 +221,11 @@ public class OverlayService extends Service {
     private float mDownX, mDownY;
     private int mDragStartX, mDragStartY;
     private boolean mDragging;
-    private long mStartedAt;                     // 引擎启动时刻：其后 600ms 内的旁听触摸视为「开始」残余
+    private boolean mDragCapable;   // 海绵 DOWN 落在锁点 80dp 内：允许拖动换位
     private final int mSlop = ViewConfiguration.getTouchSlop();
 
     private final View.OnTouchListener settingsTouch = (v, ev) -> {
         switch (ev.getActionMasked()) {
-            case MotionEvent.ACTION_OUTSIDE:
-                // 屏幕任意位置的真实触摸旁听（含我们自己派发的连点，需豁免）：
-                // ① inOwnGesture = 自身连点的 150ms 豁免窗 ② 启动后 600ms 内 = 「开始」按钮的残余触摸
-                if (mState == STATE_RUNNING && !TapService.inOwnGesture()
-                        && SystemClock.uptimeMillis() - mStartedAt > 600) {
-                    android.util.Log.i("AutoClicker", "outside-touch: user touch -> STOP");
-                    stopClicking("检测到手动触摸，已停止");
-                }
-                return true;
             case MotionEvent.ACTION_DOWN:
                 if (mState == STATE_RUNNING) {
                     // 执行中红钮一碰即停，无条件。自身连点只落在靶标点（锁点时已避开设置钮），
@@ -261,8 +267,11 @@ public class OverlayService extends Service {
             case MotionEvent.ACTION_DOWN:
                 if (mState == STATE_RUNNING) {
                     // 双保险（正常应已被 FLAG_NOT_TOUCHABLE 穿透，收不到事件）。
-                    // 同样只靠 inOwnGesture() 防自击，不做 deviceId 判别。
-                    if (!TapService.inOwnGesture()) stopClicking();
+                    // 收得到 = 穿透标志未生效或其被系统改回，记日志（首击自伤排查依据）。
+                    boolean own = TapService.inOwnGesture();
+                    android.util.Log.i("AutoClicker", "target-touch: running own=" + own
+                            + " xy=" + (int) ev.getRawX() + "," + (int) ev.getRawY());
+                    if (!own) stopClicking();
                     return true;
                 }
                 mDownX = ev.getRawX(); mDownY = ev.getRawY();
@@ -318,11 +327,11 @@ public class OverlayService extends Service {
     /** 全屏遮罩 + 居中设置面板。窗口可聚焦（否则输入法不弹）。 */
     private void showSettingsPanel() {
         if (mPanelRoot != null) return;
-        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+        WindowManager.LayoutParams lp = noFit(new WindowManager.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
                 mSettingsLp.type,
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                PixelFormat.TRANSLUCENT);
+                PixelFormat.TRANSLUCENT));
         lp.gravity = Gravity.TOP | Gravity.START;
         lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
 
@@ -585,8 +594,7 @@ public class OverlayService extends Service {
 
         // 3) 先进执行态 + 提交窗口穿透标志，再启动引擎。
         //    顺序不可颠倒：引擎第一下点击派发需几毫秒，若穿透标志晚于它生效，
-        //    第一击会落进自己的靶标窗口（WM relayout 有延迟）。
-        mStartedAt = SystemClock.uptimeMillis();
+        //    第一击会落进自己的靶标窗口（WM relayout 有延迟；TapService 另有 120ms 首击延迟兜底）。
         mState = STATE_RUNNING;
         mSettingsBtn.setRunning(true);
         setRunningWindowFlags(true);   // 靶标穿透 + 屏幕常亮（同步提交给 WindowManager）
@@ -604,6 +612,18 @@ public class OverlayService extends Service {
 
         updateForeground("正在连点 · 每 " + fmtIv(intervalMs) + " 一次");
         startBlink();
+        // 兜底：上一会话若有残留海绵（拖停后未抬手就重新开始等极端时序），先强制清掉
+        mSpongeTouching = false;
+        removeSponge();
+        // 海绵延迟 300ms 再挂，错开首击（120ms 派发）：ai 实测海绵 addView 后 ~130ms 内
+        // 注入首击被尚未同步完成的窗口截住 → 点击被吞 + DOWN 分支当真手停机。
+        if (mSpongePending != null) mMain.removeCallbacks(mSpongePending);
+        if (mSpongeRemovePending != null) mMain.removeCallbacks(mSpongeRemovePending);
+        final int sx = lx, sy = ly;
+        mSpongePending = () -> {
+            if (mState == STATE_RUNNING && !mSpongeAdded) addSponge(sx, sy);
+        };
+        mMain.postDelayed(mSpongePending, 300);
     }
 
     private void stopClicking() { stopClicking(null); }
@@ -619,9 +639,152 @@ public class OverlayService extends Service {
         if (mSettingsBtn != null) mSettingsBtn.setRunning(false);
         setRunningWindowFlags(false);
         stopBlink();
+        if (mSpongePending != null) mMain.removeCallbacks(mSpongePending);
+        scheduleSpongeRemoval();
         updateForeground("已停止");
         if (msg != null) toast(msg);
     }
+
+    /** 停止后海绵延迟 1.5s 再拆（an）。背景：采样通道恢复「单次差异即停」（an 复盘：
+     *  am 的稳定确认在闪烁页面上永远凑不齐 → 换页兜底通道瘫痪），页面闪烁仍可能自动
+     *  停引擎——海绵若随停即拆，用户紧接着的触摸直达应用 = 误点（al 实测定案）。
+     *  延迟拆除让停止后 1.5s 内的触摸被海绵吸收，误点从机制上根治；手指已在海绵上
+     *  （触摸即停/拖停场景）维持原逻辑，抬手由 sponge-up 拆除。 */
+    private void scheduleSpongeRemoval() {
+        if (mSpongeTouching) { removeSponge(); return; }   // 抬手时 sponge-up 会拆
+        if (mSpongeRemovePending != null) mMain.removeCallbacks(mSpongeRemovePending);
+        mSpongeRemovePending = () -> { if (!mSpongeTouching) removeSponge(); };
+        mMain.postDelayed(mSpongeRemovePending, 1500);
+    }
+
+    // ============ 海绵监听层：摸到即停 / 拖动换位 ============
+
+    /** overlay 窗口一律禁 insets fit：ColorOS 对 overlay 默认做「避开状态栏」适配
+     *  （fitTypes=NAVIGATION_BARS/CAPTION_BAR），顶部窗口被整体下移 140px——
+     *  ai/aj 两轮「吞击/自停」的真凶（sponge-frame0: onScreen=0,140 want=0,0 实锤）。
+     *  本应用的 overlay 全部使用屏幕绝对坐标，必须与屏幕原点对齐；FLAG_LAYOUT_NO_LIMITS
+     *  兜底 API<30。 */
+    private static WindowManager.LayoutParams noFit(WindowManager.LayoutParams lp) {
+        if (Build.VERSION.SDK_INT >= 30) lp.setFitInsetsTypes(0);
+        lp.flags |= WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+        return lp;
+    }
+
+    /** 执行期挂海绵：4 块可触摸矩形铺满全屏，只在锁点周围留 ±2dp 小孔。
+     *  自动点击只从孔里穿过 → 「摸到海绵」本身就是 100% 用户指纹，无需任何判别
+     *  （v1.0.0ai 定案：ColorOS 触摸副本不可复原，aa~ah 的全部「旁听+判别」方案作废）。 */
+    private void addSponge(int cx, int cy) {
+        if (mSpongeAdded) return;
+        int hole = (int) dp(SPONGE_HOLE_DP);       // 小孔半宽（±2dp≈±7px，自动点击必经）
+        int l = cx - hole, t = cy - hole, r = cx + hole, b = cy + hole;
+        int[][] rects = {
+                {0, 0, mScreenW, t},               // 上：全宽 × 孔上沿
+                {0, b, mScreenW, mScreenH - b},    // 下
+                {0, t, l, b - t},                  // 左：孔左边
+                {r, t, mScreenW - r, b - t},       // 右
+        };
+        for (int i = 0; i < 4; i++) {
+            int x = Math.max(0, rects[i][0]), y = Math.max(0, rects[i][1]);
+            int w = Math.min(rects[i][2], mScreenW - x), h = Math.min(rects[i][3], mScreenH - y);
+            if (w <= 0 || h <= 0) { mSpongeViews[i] = null; continue; }
+            View v = new View(this);
+            v.setOnTouchListener(spongeTouch);
+            WindowManager.LayoutParams lp = noFit(new WindowManager.LayoutParams(w, h,
+                    mSettingsLp.type,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.TRANSLUCENT));
+            lp.gravity = Gravity.TOP | Gravity.START;
+            lp.x = x; lp.y = y;
+            final int fi = i, fx = x, fy = y;
+            try {
+                mWm.addView(v, lp); mSpongeViews[i] = v;
+                // 帧级取证：打印窗口实际落屏位置，与期望值对账（鉴别 ColorOS 定位偏移）
+                v.post(() -> {
+                    int[] loc = new int[2];
+                    v.getLocationOnScreen(loc);
+                    android.util.Log.i("AutoClicker", "sponge-frame" + fi + ": onScreen=" + loc[0] + "," + loc[1]
+                            + " want=" + fx + "," + fy);
+                });
+            }
+            catch (Exception e) { mSpongeViews[i] = null; }
+            android.util.Log.i("AutoClicker", "sponge-rect" + i + ": " + x + "," + y
+                    + " " + w + "x" + h + " hole=" + cx + "," + cy + "±" + hole);
+        }
+        mSpongeAdded = true;
+    }
+
+    /** 拆海绵。手指还在屏上时延迟（否则拖动/吞触中途窗口被拆、手势中断）。 */
+    private void removeSponge() {
+        if (mSpongeTouching) return;
+        for (int i = 0; i < 4; i++) {
+            if (mSpongeViews[i] != null) {
+                try { mWm.removeView(mSpongeViews[i]); } catch (Exception ig) {}
+                mSpongeViews[i] = null;
+            }
+        }
+        mSpongeAdded = false;
+    }
+
+    private final View.OnTouchListener spongeTouch = (v, ev) -> {
+        // 注入手势豁免（双条件，缺一不可）：
+        // ① inOwnGesture()：手势在途 + 135ms 尾差窗（al 教训：6Hz 时该窗盖住 81% 时间轴，
+        //    真手 DOWN 大概率撞上被误豁免 → 「点 2~3 次才停」，与 ad 时代时间窗教训同源）；
+        // ② 落点在锁点 ±2dp 孔内：注入事件坐标=锁点精确值（aj/ak 日志实测 ±0.1px），
+        //    真手不可能精确落孔心。二者同时成立才豁免 → 真手无论何时按下都立即停。
+        if (TapService.inOwnGesture()
+                && TapService.nearTapPoint(ev.getRawX(), ev.getRawY(), SPONGE_HOLE_DP)) {
+            android.util.Log.i("AutoClicker", "sponge-inject: own gesture ignored ("
+                    + ev.getActionMasked() + ") xy=" + (int) ev.getRawX() + "," + (int) ev.getRawY());
+            return true;
+        }
+        switch (ev.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN: {
+                mSpongeTouching = true;
+                mDownX = ev.getRawX(); mDownY = ev.getRawY();
+                mDragStartX = mTargetLp.x; mDragStartY = mTargetLp.y;
+                mDragging = false;
+                // 海绵只存在于执行期：摸到 = 用户触摸（自动点击只走小孔），一律 DOWN 即停。
+                // 锁点 80dp 内额外允许拖动换位（mDragCapable：超 slop 后靶标跟手）。
+                mDragCapable = TapService.nearTapPoint(mDownX, mDownY, SPONGE_DRAG_DP);
+                boolean onBtn = hitRect(mSettingsLp, mBtnSize, 0, (int) mDownX, (int) mDownY);
+                android.util.Log.i("AutoClicker", "sponge-down: xy=" + (int) mDownX + "," + (int) mDownY
+                        + " dragCap=" + mDragCapable + " onBtn=" + onBtn + " state=" + mState);
+                if (mState == STATE_RUNNING) {
+                    stopClicking(onBtn ? "已停止" : "检测到手动触摸，已停止");
+                }
+                return true;
+            }
+            case MotionEvent.ACTION_MOVE: {
+                if (!mDragCapable) return true;   // 非抓靶区滑动不挪靶标（停止后顺手的滑动不改变落点）
+                float dx = ev.getRawX() - mDownX, dy = ev.getRawY() - mDownY;
+                if (!mDragging && (Math.abs(dx) > mSlop || Math.abs(dy) > mSlop)) {
+                    mDragging = true;
+                    // 引擎在 DOWN 时已停；海绵因手指在屏延迟拆除，拖动不受影响
+                    android.util.Log.i("AutoClicker", "sponge-drag: relocate");
+                }
+                if (mDragging) {   // 靶标跟手走
+                    mTargetLp.x = mDragStartX + (int) dx;
+                    mTargetLp.y = mDragStartY + (int) dy;
+                    clampLp(mTargetLp, mTgtSize, mTgtSize);
+                    try { mWm.updateViewLayout(mTarget, mTargetLp); } catch (Exception ig) {}
+                }
+                return true;
+            }
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                boolean wasDrag = mDragging;
+                mDragging = false;
+                mSpongeTouching = false;
+                android.util.Log.i("AutoClicker", "sponge-up: drag=" + wasDrag + " state=" + mState);
+                if (wasDrag) savePos();   // 靶标停在新位置，下一轮点新位置
+                else if (mState == STATE_RUNNING) stopClicking("检测到手动触摸，已停止");
+                removeSponge();
+                return true;
+        }
+        return true;
+    };
 
     private static boolean hitRect(WindowManager.LayoutParams lp, int size, int pad, int x, int y) {
         return x >= lp.x - pad && x <= lp.x + size + pad && y >= lp.y - pad && y <= lp.y + size + pad;
@@ -640,6 +803,8 @@ public class OverlayService extends Service {
             if (mSettingsBtn != null) mSettingsBtn.setRunning(false);
             setRunningWindowFlags(false);
             stopBlink();
+            removeSponge();   // 引擎自行结束（跑完/取消/息屏）时同步拆海绵（手指在屏则待抬手）
+
             String msg, ntf;
             if (natural) { msg = "连点完成"; ntf = "已完成"; }
             else if (TapService.R_TOUCH.equals(reason)) { msg = "检测到手动触摸，已停止"; ntf = "已停止（手动触摸）"; }
@@ -805,7 +970,7 @@ public class OverlayService extends Service {
                 ? new Notification.Builder(this, "tap")
                 : new Notification.Builder(this);
         b.setSmallIcon(android.R.drawable.ic_media_play)
-                .setContentTitle("连点器")
+                .setContentTitle("L1Tap")
                 .setContentText(text)
                 .setContentIntent(pi)
                 .setOngoing(true)

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">连点器</string>
+    <string name="app_name">L1Tap</string>
     <string name="accessibility_description">仅在您打开的 App 中，对您用靶标锁定的单个屏幕位置进行自动点击。执行中会实时监测：您一触摸屏幕立即停止；靶标位置的控件特征（类名/文本/边界）变化或前台应用切换也立即停止。控件特征仅用于安全比对，不存储、不上传、不收集任何数据。</string>
-    <string name="accessibility_label">连点器自动点击服务</string>
+    <string name="accessibility_label">L1Tap 自动点击服务</string>
 </resources>

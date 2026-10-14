@@ -21,7 +21,7 @@ import android.widget.TextView;
 import java.util.List;
 
 /**
- * 连点器主界面：权限引导（悬浮窗 + 无障碍）与使用说明。
+ * L1Tap 主界面：权限引导（悬浮窗 + 无障碍）与使用说明。
  * 点"启动悬浮控件"后拉起 OverlayService，两个悬浮球常驻。
  */
 public class MainActivity extends Activity {
@@ -61,15 +61,13 @@ public class MainActivity extends Activity {
         mOvStatus.setTextColor(ov ? 0xFF39FF14 : 0xFFFF3B30);
         mOvBtn.setBackground(btn(ov ? 0xFF1F2A1F : 0xFF39FF14));
         mOvBtn.setTextColor(ov ? 0xFF8FA08F : 0xFF0E0E0E);
-        mOvBtn.setText(ov ? "已开启" : "去开启");
-        mOvBtn.setEnabled(!ov);
+        mOvBtn.setText(ov ? "已开启 ▸" : "去开启");   // 已开启也可点：进入系统设置页查看/调整
 
         mAcStatus.setText(ac ? "✔ 已开启" : "✘ 未开启");
         mAcStatus.setTextColor(ac ? 0xFF39FF14 : 0xFFFF3B30);
         mAcBtn.setBackground(btn(ac ? 0xFF1F2A1F : 0xFF39FF14));
         mAcBtn.setTextColor(ac ? 0xFF8FA08F : 0xFF0E0E0E);
-        mAcBtn.setText(ac ? "已开启" : "去开启");
-        mAcBtn.setEnabled(!ac);
+        mAcBtn.setText(ac ? "已开启 ▸" : "去开启");   // 已开启也可点：进入无障碍设置页查看/调整
 
         mLaunch.setBackground(btn(ov && ac ? 0xFF39FF14 : 0xFF1F2A1F));
         mLaunch.setTextColor(0xFF0E0E0E);
@@ -97,7 +95,7 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView title = new TextView(this);
-        title.setText("连点器");
+        title.setText("L1Tap");
         title.setTextSize(30);
         title.setTypeface(null, Typeface.BOLD);
         title.setTextColor(0xFFE8F5E9);
@@ -167,7 +165,7 @@ public class MainActivity extends Activity {
                 + "3) 在设置页点「开始」：面板收起，钮变红 ■，开始连点；屏幕保持常亮\n"
                 + "4) 执行中靶标只显示不拦截触摸，您可正常操作屏幕任何位置\n"
                 + "5) 停止方式(任一)：触摸屏幕任意处 / 碰红钮 / 通知栏「停止」\n"
-                + "   以及自动停止：靶标位置内容变化 / 切换应用 / 息屏 / 跑完轮次";
+                + "   以及自动停止：靶标内容变化 / 页面切换 / 切换应用 / 息屏 / 跑完轮次";
         TextView st = t(steps, 12, 0xFF8FA08F);
         st.setLineSpacing(dp(this, 4), 1.0f);
         info.addView(st, lp(0, 0));
