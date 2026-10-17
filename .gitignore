@@ -1,6 +1,9 @@
 # 构建中间产物
 build/
 
+# 构建产物（APK 只进 Release，不进仓库）
+out/
+
 # JVM 崩溃日志
 hs_err_pid*.log
 replay_pid*.log

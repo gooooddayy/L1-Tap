@@ -26,7 +26,7 @@ echo "== [2/7] aapt2 compile 资源 =="
 echo "== [3/7] aapt2 link + 生成 R.java =="
 "$BT/aapt2.exe" link -o "$(cygpath -w build/base.apk)" -I "$(cygpath -w "$AJ")" \
   --manifest "$(cygpath -w build/AndroidManifest.xml)" --java "$(cygpath -w build/gen)" \
-  --min-sdk-version 24 --target-sdk-version 33 --version-code 21 --version-name 1.0.0ap \
+  --min-sdk-version 24 --target-sdk-version 33 --version-code 22 --version-name 1.0.0aq \
   --auto-add-overlay "$(cygpath -w build/res.zip)"
 
 echo "== [4/7] javac 编译 =="
@@ -51,7 +51,7 @@ if [ ! -f keystore/app.jks ]; then
     -storepass "$PASS" -keypass "$PASS" -alias l1key -keyalg RSA -keysize 2048 -validity 10950 \
     -dname "CN=L1 Tools,O=L1,C=CN" 2>/dev/null
 fi
-OUT="out/L1Tap-v1.0.0ap.apk"
+OUT="out/L1Tap-v1.0.0aq.apk"
 "$BT/apksigner.bat" sign --ks "$(cygpath -m keystore/app.jks)" --ks-pass "pass:$PASS" \
   --key-pass "pass:$PASS" --ks-key-alias l1key --out "$(cygpath -m "$OUT")" "$(cygpath -m build/aligned.apk)"
 

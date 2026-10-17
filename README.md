@@ -46,7 +46,7 @@ Android 悬浮窗连点器工具。两个悬浮钮（⚙ 设置/停止钮 48dp +
 ## 构建指南
 
 ```bash
-bash build.sh   # 产物 out/L1Tap-v1.0.0ap.apk
+bash build.sh   # 产物 out/L1Tap-v1.0.0aq.apk
 ```
 
 环境依赖：JDK 11+、Android SDK build-tools 33+（脚本内 `BT`/`JB` 变量指向本机路径，克隆后按需修改）。
@@ -70,12 +70,13 @@ bash build.sh   # 产物 out/L1Tap-v1.0.0ap.apk
 
 | 版本 | versionCode | 要点 |
 |---|---|---|
+| 1.0.0aq | 22 | **「无障碍列表找不到 L1Tap」根因定案——不是列表刷新慢，是手机「应用速冻」**。真机实测（ColorOS 14 / Android 14）：速冻把包置为 `COMPONENT_ENABLED_STATE_DISABLED`（≈`pm disable`），被禁用包不参与 intent 解析 → `queryIntentServices` 收不到 → `AccessibilityManagerService.mInstalledServices` 里没有 TapService → 设置「已下载的应用」里根本没有条目；点图标启动会先解冻（enabled 2→1），系统重扫后才出现。实测：启动前 `installedServiceCount=20`、`pm list packages -d` 含本包；`am start` 后变 21、`query-services` 出现 `.TapService`。处置：主界面无障碍卡三态（✔已开启 / ✘未开启 / ⚠系统待刷新，3s×12 轮询自愈）+ 使用说明加「找不到 L1Tap」排障两条。顺带证伪两条旧猜测：`exported=false` 不影响收录与绑定（清单未改）；`ACCESSIBILITY_DETAILS_SETTINGS` 详情页深链被签名权限 `OPEN_ACCESSIBILITY_DETAILS_SETTINGS` 挡住，三方应用调用必抛 SecurityException |
 | 1.0.0ai | 14 | **触摸停止架构重构「海绵层」**（全版本审查定案）：ColorOS 的 ACTION_OUTSIDE 触摸副本坐标/旗标/工具类型全部不可复原，真手与注入同签名——「旁听+判别」路线物理上不可行（aa~ah 五轮均折在此）。改为几何判别：执行期 4 块触摸矩形铺满全屏、仅锁点 ±2dp(≈14px) 小孔的「海绵层」——自动点击只走小孔，摸到海绵 = 100% 用户 → **DOWN 即停**（孔外任意位置，快于此前所有通道；锁点 80dp 内拖动=停+换位，非抓靶区滑动不挪靶标）；**整个 ACTION_OUTSIDE 通道与全部过滤条件删除**；新增首击延迟 120ms（修 vc12 起 6/8 会话首击被自家靶窗吞掉的「少点一次」）；onFinished 同步拆海绵（修自然结束后监听层滞留到下次触摸才自清） |
 | 1.0.0ak | 16 | **修「只点一次」——overlay 窗口 insets fit 实锤**：aj 取证日志 `sponge-frame0: onScreen=0,140 want=0,0` 钉死根因——ColorOS 对 overlay 默认做「避开状态栏」适配（fitTypes=NAVIGATION_BARS/CAPTION_BAR），顶部窗口整体下移 140px，把锁点小孔整个盖住 → 海绵挂上后每击注入都被顶部大板吞掉（`sponge-inject` 计 8 次），仅首击（海绵挂载前）到达应用。ai 版「一点开始就停」同根因。修复：新增 `noFit()` helper（`setFitInsetsTypes(0)` + `FLAG_LAYOUT_NO_LIMITS` 兜底），设置钮/靶标/面板/海绵 4 处 overlay 窗口统一禁 fit，保证屏幕绝对坐标与手势坐标对齐 |
 | 1.0.0al | 17 | **修高频「点 2~3 次才停」**：`inOwnGesture()` 豁免窗=在途+135ms 尾差，6Hz 时盖住 81% 时间轴，真手 DOWN 大概率撞上被误豁免（12:50:28 实测连按 3 次才停）。豁免收紧为双条件：注入期 **且** 落点在锁点 ±2dp 孔内（注入坐标=锁点精确值 ±0.1px，真手不可能落孔心）——真手无论何时按下都立即停。与 ad「±80dp 坐标豁免挡注入」同一几何思想，方向相反 |
 | 1.0.0am | 18 | **修「开跑 1~2s 自停 + 停止后误点」**（al 实测定案）：网易云等页面锁点处控件（ImageSwitcher 与其下层 TextView「放松时都在听」）随内容刷新在采样里来回抖动，`target-changed(sig)` 单次差异即停 → 引擎 1~2s 自杀、海绵随停止拆除、用户后续触摸直达应用（误点；日志 13:13 全部会话 reason=target 且无一条 sponge-down）。修复：sig/sig-gone 类变化需连续 3 次采样（~750ms）稳定在同一新状态才判真变化；ori/pkg 强信号保持立即停。海绵从此全程在线，停止那一下由海绵吸收触摸、不传应用 |
 | 1.0.0an | 19 | **换页停止三通道重构**（am 回归「侧滑返回不停止」复盘）：① 新增窗口事件 Activity 白名单——同应用切页的事件类名含「Activity」立即停，弹层/对话框类名不含 → 既不更新锚也不误杀（ab 教训不回归）② 采样恢复 al 的「单次差异即停」（am 的「3 次完全相同」确认在闪烁页面上永远凑不齐：bounds 每次抖几 px + TextView↔null 交替 → 换页兜底通道瘫痪 1~4.3s 不停）③ 海绵延迟 1.5s 拆除（scheduleSpongeRemoval）——单次差异误停后海绵仍在屏，用户触摸被吸收，误点从机制上根治且不再依赖采样判得准。侧滑返回四重保障：海绵 0ms / cancel 0ms / Activity 事件 0ms / 采样 ≤250ms |
-| 1.0.0ao | 20 | **修「侧滑返回误触返回后页面的元素」**（an 实测复盘：4 次侧滑 page-changed(act) 全部秒停且事件后 0 击，误触来自事件到达前 ~120-190ms 盲区窗的最后一击——换页动画期新页窗口已可见可收触摸）。盲区收窄双闸：① systemui 窗口事件 → 暂停派发 400ms（返回手势提示层是 systemui 窗口，手势一开始就停发新击，横幅消失自动恢复）② 每击派发前 getRootInActiveWindow 核对活动窗口 pkg/Activity 类名，变了先停再派（比 a11y 事件投递快一层）。保留 15ms 点击时长。诚实边界：间隙期边缘滑动被 ColorOS 系统层截走、无信号可达应用层，盲区无法归零；无障碍列表「有时不显示」为 ColorOS 怪癖（本应用零崩溃、无 disableSelf） |
+| 1.0.0ao | 20 | **修「侧滑返回误触返回后页面的元素」**（an 实测复盘：4 次侧滑 page-changed(act) 全部秒停且事件后 0 击，误触来自事件到达前 ~120-190ms 盲区窗的最后一击——换页动画期新页窗口已可见可收触摸）。盲区收窄双闸：① systemui 窗口事件 → 暂停派发 400ms（返回手势提示层是 systemui 窗口，手势一开始就停发新击，横幅消失自动恢复）② 每击派发前 getRootInActiveWindow 核对活动窗口 pkg/Activity 类名，变了先停再派（比 a11y 事件投递快一层）。保留 15ms 点击时长。诚实边界：间隙期边缘滑动被 ColorOS 系统层截走、无信号可达应用层，盲区无法归零；无障碍列表「有时不显示」为 ColorOS 怪癖（本应用零崩溃、无 disableSelf）——<br>*aq 定案更正：实为「应用速冻」把包 `pm disable`，见上行 1.0.0aq* |
 | 1.0.0ap | 21 | **修「点赞类场景 1~2 击即停」**（ao 实测定案，非触摸误检）：日志 18:06 五轮会话停止全部 `reason=target`、零 `sponge-down`——锁的是网易云点赞按钮，点击全部生效（165赞→166赞→…→175赞），文本原地刷新被 sig 采样判为「靶标变化」。修复：sig 差异但「类名+ID」未变（pointSig 只返回包含锁点的最深节点，sig 非空即仍压着锁点）→ 判定为自己点击的生效反馈，改锚续点（`target-selfupdate` 日志）；类名/ID 变了（弹层/换页换了别的东西）或 sig-gone → 照旧停止 |
 | 1.0.0aj | 15 | **修「一点开始就停」**（ai 装机首测即回归）：注入手势第一击的 DOWN 落点=锁点正中，被尚未同步完成的海绵窗口截住 → 点击被吞 + DOWN 分支当真手停机。修复三件套：① 海绵触听全分支加 `inOwnGesture()` 注入豁免（框架内部状态查询，不依赖事件属性，不受副本洗字段影响）② 海绵延迟 300ms 挂载，错开首击（120ms 派发 + 窗口表同步）③ 取证强化：`sponge-frame*` 实际落屏位置对账、`tap-dispatch` 每击派发记录、`sponge-inject` 注入命中计数；TapService 日志 tag 单列（此前被 `logcat -s AutoClicker` 滤掉） |
 | 1.0.0ah | 13 | 修复 ag 回归「触摸屏幕不停止」：注入判别中 toolType==UNKNOWN 条件误伤——ColorOS 的 ACTION_OUTSIDE 副本不保留工具类型，真手副本也是 UNKNOWN → 真实触摸全被豁免（17 会话 outside 通道 0 次触发，ae 为 5 次）；注入判据只留 flags 0x800（系统级标记，真手不可能带），并更正上轮对 ae 两次 outside 停止的误判（相位 0.6~0.85s 非锁相，实为真实触摸） |
@@ -91,9 +92,10 @@ bash build.sh   # 产物 out/L1Tap-v1.0.0ap.apk
 
 ## 下载
 
-- 最新版：[Releases · v1.0.0](https://github.com/gooooddayy/L1-Tap/releases/latest) 下载 `AutoClicker-v1.0.0.apk`
+- 最新版：[Releases · v1.0.0](https://github.com/gooooddayy/L1-Tap/releases/latest) 下载 `L1Tap-v1.0.0aq.apk`
 - 安装：下载后直接安装；首次打开按引导授予悬浮窗 + 无障碍权限（各一次）
 - 系统要求：Android 7.0 及以上；免 Root
+- **无障碍列表里找不到 L1Tap？** 厂商「应用速冻」会把久未使用的应用整个禁用，被禁用的包不会出现在无障碍列表里——先点图标打开一次本应用（自动解冻），再到 设置 → 电池 → 应用速冻 把 L1Tap 关掉（一次性，永久生效）。详见 `docs/开发笔记-经验与踩坑.md` 第二十一节
 
 ## 相关文档
 
@@ -101,7 +103,7 @@ bash build.sh   # 产物 out/L1Tap-v1.0.0ap.apk
 - `docs/开发笔记-经验与踩坑.md` — 多轮真机 bug 根因全记录（排错先看）
 - `docs/全版本审查-触摸停止根因与重构方案.md` — aa~ah 五轮触摸停止实测证据链 + 海绵层架构定案（1.0.0ai 实施）
 - `docs/停止场景与触发判定.md` — 全停止通道场景矩阵（v1.0.0ai 修订）
-- `docs/测试清单-v1.0.0ap.md` — 最新测试清单（aa~ao 历史清单已随迁移归档入库）
+- `docs/测试清单-v1.0.0aq.md` — 最新测试清单（aa~ao 历史清单已随迁移归档入库）
 
 ## 关键词
 

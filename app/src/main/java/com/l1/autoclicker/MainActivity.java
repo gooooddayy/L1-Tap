@@ -9,6 +9,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
@@ -26,8 +28,15 @@ import java.util.List;
  */
 public class MainActivity extends Activity {
 
-    private TextView mOvStatus, mAcStatus;
+    private TextView mOvStatus, mAcStatus, mAcHint;
     private Button mOvBtn, mAcBtn, mLaunch;
+
+    /** 「系统未识别」状态的自动重检：3s 一次，最多 12 次（约 36s）后放弃，等 onResume 重置。 */
+    private static final long POLL_MS = 3000;
+    private static final int POLL_MAX = 12;
+    private final Handler mUi = new Handler(Looper.getMainLooper());
+    private int mPollTries;
+    private final Runnable mPoll = this::refresh;
 
     private static float dp(Context c, float v) { return v * c.getResources().getDisplayMetrics().density; }
 
@@ -44,11 +53,13 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        mPollTries = 0;
         refresh();
     }
 
     @Override protected void onPause() {
         super.onPause();
+        mUi.removeCallbacks(mPoll);
         // 切走页面/回桌面：立即停止连点（悬浮球与设置钮保持）
         OverlayService s = OverlayService.instance;
         if (s != null) s.requestStop();
@@ -63,8 +74,29 @@ public class MainActivity extends Activity {
         mOvBtn.setTextColor(ov ? 0xFF8FA08F : 0xFF0E0E0E);
         mOvBtn.setText(ov ? "已开启 ▸" : "去开启");   // 已开启也可点：进入系统设置页查看/调整
 
-        mAcStatus.setText(ac ? "✔ 已开启" : "✘ 未开启");
-        mAcStatus.setTextColor(ac ? 0xFF39FF14 : 0xFFFF3B30);
+        // 无障碍三态：已开启 / 未开启 / 系统未识别。
+        // 「系统未识别」= 本组件不在系统的已安装服务列表里，八成是被手机「应用速冻」(pm disable) 冻住：
+        // 被禁用的包不参与 intent 解析，系统连扫都扫不到，设置的无障碍列表里自然没有条目。
+        boolean known = ac || serviceKnownToSystem();
+        if (ac) {
+            mAcStatus.setText("✔ 已开启");
+            mAcStatus.setTextColor(0xFF39FF14);
+            mAcHint.setVisibility(View.GONE);
+        } else if (known) {
+            mAcStatus.setText("✘ 未开启");
+            mAcStatus.setTextColor(0xFFFF3B30);
+            mAcHint.setText("点右侧「去开启」→ 无障碍 → 已下载的应用 → L1Tap → 打开开关。");
+            mAcHint.setTextColor(0xFF8FA08F);
+            mAcHint.setVisibility(View.VISIBLE);
+        } else {
+            mAcStatus.setText("⚠ 系统待刷新");
+            mAcStatus.setTextColor(0xFFFFB020);
+            mAcHint.setText("系统还没把本服务列进无障碍列表（刚解冻时常见，稍等一两秒会自动刷新）。"
+                    + "若一直如此：回桌面重开一次本应用，或到 设置 → 电池 → 应用速冻 关掉 L1Tap。");
+            mAcHint.setTextColor(0xFFFFB020);
+            mAcHint.setVisibility(View.VISIBLE);
+            schedulePoll();   // 解冻后系统重扫通常一两秒，自动重检，不用退出再进
+        }
         mAcBtn.setBackground(btn(ac ? 0xFF1F2A1F : 0xFF39FF14));
         mAcBtn.setTextColor(ac ? 0xFF8FA08F : 0xFF0E0E0E);
         mAcBtn.setText(ac ? "已开启 ▸" : "去开启");   // 已开启也可点：进入无障碍设置页查看/调整
@@ -82,6 +114,29 @@ public class MainActivity extends Activity {
             if (getPackageName().equals(i.getResolveInfo().serviceInfo.packageName)) return true;
         }
         return false;
+    }
+
+    /**
+     * 本服务是否已被系统收录进「已安装的无障碍服务」列表（即设置页能否列出它）。
+     * 应用被「应用速冻」(pm disable) 时包不参与 intent 解析，系统扫不到 → 设置里没有条目，
+     * 用户表现为「无障碍列表里找不到 L1Tap、要开一会儿/进两次才有」。
+     */
+    private boolean serviceKnownToSystem() {
+        try {
+            AccessibilityManager am = (AccessibilityManager) getSystemService(ACCESSIBILITY_SERVICE);
+            for (AccessibilityServiceInfo i : am.getInstalledAccessibilityServiceList()) {
+                if (i.getResolveInfo() != null && i.getResolveInfo().serviceInfo != null
+                        && getPackageName().equals(i.getResolveInfo().serviceInfo.packageName)) return true;
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    private void schedulePoll() {
+        if (mPollTries >= POLL_MAX) return;
+        mPollTries++;
+        mUi.removeCallbacks(mPoll);
+        mUi.postDelayed(mPoll, POLL_MS);
     }
 
     private View buildUi() {
@@ -139,6 +194,9 @@ public class MainActivity extends Activity {
         acRow.addView(mAcStatus, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         acRow.addView(mAcBtn);
         acCard.addView(acRow, lp((int) dp(this, 12), 0));
+        mAcHint = t("", 12, 0xFF8FA08F);
+        mAcHint.setVisibility(View.GONE);
+        acCard.addView(mAcHint, lp((int) dp(this, 8), 0));
         root.addView(acCard, lp((int) dp(this, 12), 0));
 
         // ===== 启动（权限卡正下方） =====
@@ -169,6 +227,15 @@ public class MainActivity extends Activity {
         TextView st = t(steps, 12, 0xFF8FA08F);
         st.setLineSpacing(dp(this, 4), 1.0f);
         info.addView(st, lp(0, 0));
+
+        // 排障：系统无障碍列表里找不到本应用（被「应用速冻」置为 disabled）
+        TextView ts = t("无障碍列表里找不到 L1Tap？\n"
+                + "① 先回桌面打开一次本应用——手机若把应用「速冻」了，打开即解冻，"
+                + "系统重扫后才会把它列进「已下载的应用」；\n"
+                + "② 反复出现就到 设置 → 电池 → 应用速冻 里关掉 L1Tap（在设置里搜「速冻」更快）。",
+                12, 0xFFFFB020);
+        ts.setLineSpacing(dp(this, 4), 1.0f);
+        info.addView(ts, lp((int) dp(this, 12), 0));
         root.addView(info, lp((int) dp(this, 12), 0));
 
         return sc;
